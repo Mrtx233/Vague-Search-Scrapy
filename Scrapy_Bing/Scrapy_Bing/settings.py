@@ -1,119 +1,77 @@
 # Scrapy settings for Scrapy_Bing project
-#
-# For simplicity, this file contains only settings considered important or
-# commonly used. You can find more settings consulting the documentation:
-#
-#     https://docs.scrapy.org/en/latest/topics/settings.html
-#     https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#     https://docs.scrapy.org/en/latest/topics/spider-middleware.html
+import os
 
 BOT_NAME = "Scrapy_Bing"
 
 SPIDER_MODULES = ["Scrapy_Bing.spiders"]
 NEWSPIDER_MODULE = "Scrapy_Bing.spiders"
 
-ADDONS = {}
+# 1. 设置 User-Agent (使用更真实的现代浏览器 UA)
+USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
 
-
-# Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = "Scrapy_Bing (+http://www.yourdomain.com)"
-
-# 使用 fake_useragent 随机生成 User-Agent
-from fake_useragent import UserAgent
-USER_AGENT = UserAgent().random
-
-# Obey robots.txt rules
+# 2. 遵守 robots.txt
 ROBOTSTXT_OBEY = False
 
-# Concurrency and throttling settings
-#CONCURRENT_REQUESTS = 16
-CONCURRENT_REQUESTS_PER_DOMAIN = 1
-DOWNLOAD_DELAY = 1
+# 3. 配置并发与延迟 (模拟真人低频操作)
+CONCURRENT_REQUESTS = 1
+DOWNLOAD_DELAY = 10  # 基础延迟 10 秒
+RANDOMIZE_DOWNLOAD_DELAY = True # 随机延迟
 
-# Disable cookies (enabled by default)
-COOKIES_ENABLED = False
-
-# Disable Telnet Console (enabled by default)
-#TELNETCONSOLE_ENABLED = False
-
-# Override the default request headers:
-DEFAULT_REQUEST_HEADERS = {
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
-    "Cache-Control": "max-age=0",
+# 4. 启用 Item Pipelines (按顺序执行)
+ITEM_PIPELINES = {
+    "Scrapy_Bing.pipelines.FileProcessingPipeline": 50,     # 1. 生成基础信息
+    "Scrapy_Bing.pipelines.RedisDeduplicatePipeline": 100, # 2. URL 去重
+    "Scrapy_Bing.pipelines.CustomBingFilesPipeline": 200,  # 3. 文件下载
+    "Scrapy_Bing.pipelines.RedisMD5DeduplicatePipeline": 250,# 4. MD5 去重
+    "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
 }
 
-# Enable or disable spider middlewares
-# See https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-#SPIDER_MIDDLEWARES = {
-#    "Scrapy_Bing.middlewares.ScrapyBingSpiderMiddleware": 543,
-#}
+# 5. Redis 配置
+REDIS_HOST = "10.229.32.166"
+REDIS_PORT = 6379
+REDIS_DB = 2
+REDIS_PREFIX = "crawler"
 
-# Enable or disable downloader middlewares
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
-#DOWNLOADER_MIDDLEWARES = {
-#    "Scrapy_Bing.middlewares.ScrapyBingDownloaderMiddleware": 600,
-#}
+# 6. 语言检测与域名分类配置
+DOMAIN_CONFIG_PATH = 'url_class_keywords.json'
+LANGUAGE_MODEL_PATH = 'lid.176.bin'
+LANGUAGE_CONFIDENCE_THRESHOLD = 0.8
 
-# Playwright settings
-try:
-    import scrapy_playwright
+# 7. Playwright 配置
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
 
-    _SCRAPY_PLAYWRIGHT_AVAILABLE = True
-except ModuleNotFoundError:
-    _SCRAPY_PLAYWRIGHT_AVAILABLE = False
+TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
-if _SCRAPY_PLAYWRIGHT_AVAILABLE:
-    PLAYWRIGHT_LAUNCH_OPTIONS = {
-        "headless": True,
+# 8. Playwright 持久化上下文 (保持同一个浏览器窗口/配置文件)
+PLAYWRIGHT_CONTEXTS = {
+    "default": {
+        "user_data_dir": os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pw_profile"),
+        "headless": False,
     }
+}
 
-    TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
+PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = 1
 
-    DOWNLOAD_HANDLERS = {
-        "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    }
+# 8. Playwright 隐身模式与回调配置
+def run_stealth(page, request):
+    from playwright_stealth import stealth_sync
+    stealth_sync(page)
 
-# Enable or disable extensions
-# See https://docs.scrapy.org/en/latest/topics/extensions.html
-#EXTENSIONS = {
-#    "scrapy.extensions.telnet.TelnetConsole": None,
-#}
+PLAYWRIGHT_PROCESS_REQUEST_KWARGS = {
+    "page_init_callback": run_stealth,
+}
 
-# Configure item pipelines
-# See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "Scrapy_Bing.pipelines.ScrapyBingPipeline": 300,
-#}
+# 9. 超时设置
+PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 120000 # 120 秒
 
-# Enable and configure the AutoThrottle extension (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-#AUTOTHROTTLE_ENABLED = True
-# The initial download delay
-#AUTOTHROTTLE_START_DELAY = 5
-# The maximum download delay to be set in case of high latencies
-#AUTOTHROTTLE_MAX_DELAY = 60
-# The average number of requests Scrapy should be sending in parallel to
-# each remote server
-#AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
-# Enable showing throttling stats for every response received:
-#AUTOTHROTTLE_DEBUG = False
+# 10. 文件存储路径
+FILES_STORE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'downloads')
 
-# Enable and configure HTTP caching (disabled by default)
-# See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html#httpcache-middleware-settings
-#HTTPCACHE_ENABLED = True
-#HTTPCACHE_EXPIRATION_SECS = 0
-#HTTPCACHE_DIR = "httpcache"
-#HTTPCACHE_IGNORE_HTTP_CODES = []
-#HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"
+# 11. 日志设置
+LOG_LEVEL = 'INFO'
+LOG_ENCODING = 'utf-8'
 
-# Set settings whose default value is deprecated to a future-proof value
 FEED_EXPORT_ENCODING = "utf-8"
