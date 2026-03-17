@@ -15,7 +15,8 @@ class CustomBingFilesPipeline(FilesPipeline):
     """
     def get_media_requests(self, item, info):
         from scrapy import Request
-        yield Request(item['url'], meta={'item': item})
+        # 确保下载请求使用 Scrapy 默认下载器，不带 Playwright 元数据
+        yield Request(item['url'], meta={'item': item, 'download_timeout': 60})
 
     def file_path(self, request, response=None, info=None, *, item=None):
         item = request.meta.get('item')

@@ -19,11 +19,11 @@ RANDOMIZE_DOWNLOAD_DELAY = True # 随机延迟
 
 # 4. 启用 Item Pipelines (按顺序执行)
 ITEM_PIPELINES = {
-    # "Scrapy_Bing.pipelines.FileProcessingPipeline": 50,     # 1. 生成基础信息
-    # "Scrapy_Bing.pipelines.RedisDeduplicatePipeline": 100, # 2. URL 去重
-    # "Scrapy_Bing.pipelines.CustomBingFilesPipeline": 200,  # 3. 文件下载
-    # "Scrapy_Bing.pipelines.RedisMD5DeduplicatePipeline": 250,# 4. MD5 去重
-    # "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
+    "Scrapy_Bing.pipelines.FileProcessingPipeline": 50,     # 1. 生成基础信息
+    "Scrapy_Bing.pipelines.RedisDeduplicatePipeline": 100, # 2. URL 去重
+    "Scrapy_Bing.pipelines.CustomBingFilesPipeline": 200,  # 3. 文件下载
+    "Scrapy_Bing.pipelines.RedisMD5DeduplicatePipeline": 250,# 4. MD5 去重
+    "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
 }
 
 # 5. Redis 配置
@@ -33,48 +33,15 @@ REDIS_DB = 2
 REDIS_PREFIX = "crawler"
 
 # 6. 语言检测与域名分类配置
-DOMAIN_CONFIG_PATH = 'url_class_keywords.json'
-LANGUAGE_MODEL_PATH = 'lid.176.bin'
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DOMAIN_CONFIG_PATH = os.path.join(_PROJECT_ROOT, 'url_class_keywords.json')
+LANGUAGE_MODEL_PATH = os.path.join(_PROJECT_ROOT, 'lid.176.bin')
 LANGUAGE_CONFIDENCE_THRESHOLD = 0.8
 
-# 7. Playwright 配置
-DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-}
-
-PLAYWRIGHT_LAUNCH_OPTIONS = {
-    "headless": False,
-}
-
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
-
-# 8. Playwright 持久化上下文 (保持同一个浏览器窗口/配置文件)
-PLAYWRIGHT_CONTEXTS = {
-    "default": {
-        "user_data_dir": os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pw_profile"),
-        "headless": False,
-    }
-}
-
-PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = 1
-
-# 8. Playwright 隐身模式与回调配置
-def run_stealth(page, request):
-    from playwright_stealth import stealth_sync
-    stealth_sync(page)
-
-PLAYWRIGHT_PROCESS_REQUEST_KWARGS = {
-    "page_init_callback": run_stealth,
-}
-
-# 9. 超时设置
-PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 120000 # 120 秒
-
-# 10. 文件存储路径
+# 7. 文件存储路径
 FILES_STORE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'downloads')
 
-# 11. 日志设置
+# 8. 日志设置
 LOG_LEVEL = 'INFO'
 LOG_ENCODING = 'utf-8'
 
