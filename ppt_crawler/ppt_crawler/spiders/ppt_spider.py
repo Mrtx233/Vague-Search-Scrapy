@@ -94,7 +94,7 @@ class PptSpider(Spider):
         self.base_dir = None
         self.finished_json = None
         self.keyword_json = None
-        self.file_type = None
+        self.file_type = "pptx"
         self.file_type_1 = None
         self.request_delay = None
         self.port_range = None
