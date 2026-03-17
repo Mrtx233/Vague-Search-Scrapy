@@ -19,11 +19,11 @@ RANDOMIZE_DOWNLOAD_DELAY = True # 随机延迟
 
 # 4. 启用 Item Pipelines (按顺序执行)
 ITEM_PIPELINES = {
-    "Scrapy_Bing.pipelines.FileProcessingPipeline": 50,     # 1. 生成基础信息
-    "Scrapy_Bing.pipelines.RedisDeduplicatePipeline": 100, # 2. URL 去重
-    "Scrapy_Bing.pipelines.CustomBingFilesPipeline": 200,  # 3. 文件下载
-    "Scrapy_Bing.pipelines.RedisMD5DeduplicatePipeline": 250,# 4. MD5 去重
-    "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
+    # "Scrapy_Bing.pipelines.FileProcessingPipeline": 50,     # 1. 生成基础信息
+    # "Scrapy_Bing.pipelines.RedisDeduplicatePipeline": 100, # 2. URL 去重
+    # "Scrapy_Bing.pipelines.CustomBingFilesPipeline": 200,  # 3. 文件下载
+    # "Scrapy_Bing.pipelines.RedisMD5DeduplicatePipeline": 250,# 4. MD5 去重
+    # "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
 }
 
 # 5. Redis 配置
@@ -41,6 +41,10 @@ LANGUAGE_CONFIDENCE_THRESHOLD = 0.8
 DOWNLOAD_HANDLERS = {
     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
+
+PLAYWRIGHT_LAUNCH_OPTIONS = {
+    "headless": False,
 }
 
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
