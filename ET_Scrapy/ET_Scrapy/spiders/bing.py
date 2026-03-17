@@ -1,14 +1,13 @@
-import os
 import logging
-from pathlib import Path
 from urllib.parse import quote_plus
 
-from bs4 import BeautifulSoup
 from lxml import etree
 from scrapy import Spider, Request
 from scrapy.http import Response
+from scrapy_playwright.page import PageMethod
 
 logger = logging.getLogger(__name__)
+
 
 def get_proxy_config() -> dict:
     """获取代理配置，返回字典格式"""
@@ -23,53 +22,76 @@ class BingSpider(Spider):
     name = "bing"
     allowed_domains = ["www.bing.com"]
 
-    # 默认关键词和输出文件名
-    DEFAULT_KEYWORD = "新能源"
+    DEFAULT_KEYWORD = ["新能源", "人工智能", "光伏", "储能"]
 
-    def __init__(self, keyword=None, output_file=None, *args, **kwargs):
+    def __init__(self, keyword=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # 接收命令行参数
-        self.keyword = keyword if keyword else self.DEFAULT_KEYWORD
+
+        if keyword:
+            self.keywords = [k.strip() for k in keyword.split(",") if k.strip()]
+        else:
+            self.keywords = self.DEFAULT_KEYWORD
+
+        self.all_links = set()  # 用于去重汇总
 
     def start_requests(self):
-        """构建并发送初始请求"""
-        # 构建搜索 URL：关键词 + filetype:pptx
-        search_query = f"{self.keyword} filetype:pptx"
-        search_url = f"https://www.bing.com/search?q=%E6%96%B0%E8%83%BD%E6%BA%90+filetype%3axlsx"
+        for keyword in self.keywords:
+            search_query = f"{keyword} filetype:xlsx"
+            encoded_query = quote_plus(search_query)
 
-        yield Request(
-            url=search_url,
-            callback=self.parse,
-            meta={
-                "playwright": True,  # 启用 Playwright
-                "playwright_include_page": False,  # 不需要获取 page 对象，只需响应
-                "playwright_page_methods": [
-                    {
-                        "method": "wait_for_selector",
-                        "args": ["#b_content", {"timeout": 30000}]  # 等待搜索结果区域加载
-                    }
-                ],
-                "playwright_context_kwargs": {
-                    "proxy": get_proxy_config()  # 设置代理
-                },
-            },
-            dont_filter=True,
-        )
+            for first in range(1, 52, 10):  # 1, 11, 21, ..., 101
+                search_url = (
+                    f"https://www.bing.com/search?"
+                    f"q={encoded_query}&first={first}&FORM=PORE"
+                )
+
+                yield Request(
+                    url=search_url,
+                    callback=self.parse,
+                    meta={
+                        "playwright": True,
+                        "playwright_include_page": False,
+                        "playwright_page_methods": [
+                            PageMethod("wait_for_selector", "#b_content", timeout=30000),
+                        ],
+                        "playwright_context_kwargs": {
+                            "proxy": get_proxy_config()
+                        },
+                        "first": first,
+                        "keyword": keyword,
+                    },
+                    dont_filter=True,
+                )
 
     def parse(self, response: Response):
-        """解析搜索结果页面并提取链接"""
-
-        # 检查响应状态
+        """解析搜索结果页面并汇总链接"""
         if response.status != 200:
             logger.error(f"请求失败 | 状态码: {response.status}")
             return
 
-        # 使用 lxml 解析 HTML
-        html_content = response.text
-        tree = etree.HTML(html_content)
+        tree = etree.HTML(response.text)
 
-        # 使用 XPath 提取搜索结果链接
-        links = tree.xpath("//div[@class='b_title']/h2/a/@href")
+        # 建议用这个，更稳一些
+        links = tree.xpath("//li[@class='b_algo']//h2/a/@href")
 
-        link_list = [link for link in links]
-        print(link_list)
+        before_count = len(self.all_links)
+        self.all_links.update(links)
+        after_count = len(self.all_links)
+
+        logger.info(
+            f"关键词={response.meta.get('keyword')} | "
+            f"当前页 first={response.meta.get('first')} | "
+            f"提取 {len(links)} 条 | "
+            f"新增 {after_count - before_count} 条 | "
+            f"累计 {after_count} 条"
+        )
+
+    def closed(self, reason):
+        """爬虫结束时统一输出"""
+        final_links = list(self.all_links)
+
+        logger.info(f"爬虫结束，原因: {reason}")
+        logger.info(f"去重后总链接数: {len(final_links)}")
+
+        print("最终去重后的链接列表：")
+        print(final_links)
