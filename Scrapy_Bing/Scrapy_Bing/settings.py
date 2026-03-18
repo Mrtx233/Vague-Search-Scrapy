@@ -26,22 +26,18 @@ ITEM_PIPELINES = {
     "Scrapy_Bing.pipelines.RedisStoragePipeline": 300,      # 5. 存储结果
 }
 
-# 5. Redis 配置
-REDIS_HOST = "10.229.32.166"
-REDIS_PORT = 6379
-REDIS_DB = 2
-REDIS_PREFIX = "crawler"
-
-# 6. 语言检测与域名分类配置
+# 5. 语言检测与域名分类配置
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PACKAGE_ROOT = os.path.dirname(os.path.abspath(__file__))
 DOMAIN_CONFIG_PATH = os.path.join(_PROJECT_ROOT, 'url_class_keywords.json')
 LANGUAGE_MODEL_PATH = os.path.join(_PROJECT_ROOT, 'lid.176.bin')
 LANGUAGE_CONFIDENCE_THRESHOLD = 0.8
+JSON_STORE_DIR = os.path.join(_PACKAGE_ROOT, 'json')
 
-# 7. 文件存储路径
+# 6. 文件存储路径
 FILES_STORE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'downloads')
 
-# 8. 日志设置
+# 7. 日志设置
 LOG_LEVEL = 'INFO'
 LOG_ENCODING = 'utf-8'
 

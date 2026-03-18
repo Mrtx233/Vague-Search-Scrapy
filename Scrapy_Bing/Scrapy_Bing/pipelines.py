@@ -1,12 +1,12 @@
-import redis
 import json
 import time
 import os
 from scrapy.exceptions import DropItem
 from scrapy.pipelines.files import FilesPipeline
-from Scrapy_Bing.utils import SnowflakeIdGenerator, calculate_file_md5
+from Scrapy_Bing.utils import SnowflakeIdGenerator
 from Scrapy_Bing.utils.domain_classifier import DomainClassifier
 from Scrapy_Bing.utils.language_detector import LanguageDetector
+from Scrapy_Bing.utils.json_store import JsonSetStore, JsonResultsStore
 
 # -------------------------- Pipeline 0: 自定义文件下载与存储 --------------------------
 class CustomBingFilesPipeline(FilesPipeline):
@@ -65,22 +65,21 @@ class CustomBingFilesPipeline(FilesPipeline):
 # -------------------------- Pipeline 1: URL 去重 --------------------------
 class RedisDeduplicatePipeline:
     """
-    使用 Redis 进行 URL 全局去重
+    使用本地 JSON 进行 URL 全局去重
     """
     def open_spider(self, spider):
-        self.rds = redis.Redis(
-            host=spider.settings['REDIS_HOST'],
-            port=spider.settings.getint('REDIS_PORT'),
-            db=spider.settings.getint('REDIS_DB'),
-            decode_responses=True
-        )
-        self.prefix = spider.settings['REDIS_PREFIX']
+        json_dir = spider.settings.get('JSON_STORE_DIR')
+        results_path = os.path.join(json_dir, 'results.json')
+        self.results_store = JsonResultsStore(results_path)
+        self.seen_urls = set(self.results_store.seen_urls)
 
     def process_item(self, item, spider):
-        seen_key = f"{self.prefix}:seen_url"
-        if not self.rds.sadd(seen_key, item['url']):
-            spider.logger.info(f"URL 已存在，跳过: {item['url'][:50]}")
-            raise DropItem(f"Duplicate URL: {item['url']}")
+        url = item.get('url')
+        if url and url in self.seen_urls:
+            spider.logger.info(f"URL 已存在，跳过: {url[:50]}")
+            raise DropItem(f"Duplicate URL: {url}")
+        if url:
+            self.seen_urls.add(url)
         return item
 
 # -------------------------- Pipeline 2: 核心业务处理 --------------------------
@@ -114,16 +113,12 @@ class FileProcessingPipeline:
 # -------------------------- Pipeline 3: 最终存储 --------------------------
 class RedisStoragePipeline:
     """
-    将抓取结果写入 Redis 队列，并保存本地元数据
+    将抓取结果写入本地 JSON 文件，并保存元数据
     """
     def open_spider(self, spider):
-        self.rds = redis.Redis(
-            host=spider.settings['REDIS_HOST'],
-            port=spider.settings.getint('REDIS_PORT'),
-            db=spider.settings.getint('REDIS_DB'),
-            decode_responses=True
-        )
-        self.prefix = spider.settings['REDIS_PREFIX']
+        json_dir = spider.settings.get('JSON_STORE_DIR')
+        results_path = os.path.join(json_dir, 'results.json')
+        self.results_store = JsonResultsStore(results_path)
 
     def process_item(self, item, spider):
         result_json = {
@@ -150,34 +145,29 @@ class RedisStoragePipeline:
                 json.dump(result_json, f, ensure_ascii=False, indent=2)
             spider.logger.info(f"元数据已保存到本地: {meta_path}")
 
-        result_key = f"{self.prefix}:results"
-        self.rds.rpush(result_key, json.dumps(result_json, ensure_ascii=False))
-        
-        spider.logger.info(f"成功保存结果到 Redis: {item['snowflake_id']} | {item['title'][:20]}")
+        added = self.results_store.add_result(result_json)
+        if added:
+            spider.logger.info(f"成功保存结果到本地JSON: {item['snowflake_id']} | {item['title'][:20]}")
+        else:
+            spider.logger.info(f"结果已存在（URL重复），未重复写入: {item.get('url', '')[:50]}")
         return item
 
 # -------------------------- Pipeline 4: MD5 级别去重 --------------------------
 class RedisMD5DeduplicatePipeline:
     """
-    使用 Redis 对文件内容 (MD5) 进行全局去重
+    使用本地 JSON 对文件内容 (MD5) 进行全局去重
     """
     def open_spider(self, spider):
-        self.rds = redis.Redis(
-            host=spider.settings['REDIS_HOST'],
-            port=spider.settings.getint('REDIS_PORT'),
-            db=spider.settings.getint('REDIS_DB'),
-            decode_responses=True
-        )
-        self.prefix = spider.settings['REDIS_PREFIX']
+        json_dir = spider.settings.get('JSON_STORE_DIR')
+        md5_path = os.path.join(json_dir, 'seen_md5.json')
+        self.md5_store = JsonSetStore(md5_path)
 
     def process_item(self, item, spider):
         file_hash = item.get('file_hash')
         if not file_hash:
             return item
         
-        md5_key = f"{self.prefix}:seen_md5"
-        
-        if not self.rds.sadd(md5_key, file_hash):
+        if not self.md5_store.add(file_hash):
             spider.logger.info(f"MD5 已存在，跳过记录: {file_hash}")
             
             local_path = item.get('local_path')
