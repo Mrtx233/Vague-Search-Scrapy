@@ -58,9 +58,14 @@ DOWNLOAD_DELAY = 1
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "ET_Scrapy.pipelines.EtScrapyPipeline": 300,
-#}
+ITEM_PIPELINES = {
+    "ET_Scrapy.pipelines.FileDownloadPipeline": 300,
+}
+
+# 文件下载配置
+DOWNLOAD_DIR = "downloads"          # 下载保存目录
+DOWNLOAD_TIMEOUT = 30               # 下载超时（秒）
+DOWNLOAD_MAX_RETRIES = 2            # 最大重试次数
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
@@ -114,7 +119,7 @@ PLAYWRIGHT_LAUNCH_OPTIONS = {
 # 日志级别设置
 LOG_LEVEL = "INFO"  # 只显示 INFO 及以上级别的日志，屏蔽 DEBUG
 
-# 或者只屏蔽 scrapy-playwright 的 DEBUG 日志
-# LOG_FILTERS = {
-#     "scrapy-playwright": "INFO",
-# }
+# 屏蔽 asyncio 的错误输出
+LOG_FILTERS = {
+    "asyncio": "ERROR",
+}

@@ -66,7 +66,19 @@ class Bing2Spider(Spider):
             ],
             "playwright_context": self.build_context_name(keyword),
             "playwright_context_kwargs": {
-                "proxy": get_proxy_config()
+                "proxy": get_proxy_config(),
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+                "extra_http_headers": {
+                    "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+                    "sec-ch-ua-arch": '"x86"',
+                    "sec-ch-ua-bitness": '"64"',
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-fetch-dest": "document",
+                    "sec-fetch-mode": "navigate",
+                    "sec-fetch-site": "none",
+                    "sec-fetch-user": "?1",
+                }
             },
             "keyword": keyword,
         }

@@ -1,9 +1,7 @@
 # Define here the models for your spider middleware
 #
-# See documentation in:
-# https://docs.scrapy.org/en/latest/topics/spider-middleware.html
-
 from scrapy import signals
+import random
 
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
@@ -54,27 +52,42 @@ class ScrapyBingSpiderMiddleware:
 
 
 class ScrapyBingDownloaderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the downloader middleware does not modify the
-    # passed objects.
+    """
+    下载中间件 - 随机化请求头
+    """
 
     @classmethod
     def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
         s = cls()
         crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
         return s
 
     def process_request(self, request, spider):
-        # Called for each request that goes through the downloader
-        # middleware.
+        """
+        为每个请求随机化生成 headers
+        """
+        user_agents = spider.settings.get('USER_AGENTS', [])
+        accept_languages = spider.settings.get('ACCEPT_LANGUAGES', [])
+        accept_headers = spider.settings.get('ACCEPT_HEADERS', [])
 
-        # Must either:
-        # - return None: continue processing this request
-        # - or return a Response object
-        # - or return a Request object
-        # - or raise IgnoreRequest: process_exception() methods of
-        #   installed downloader middleware will be called
+        if user_agents:
+            request.headers['User-Agent'] = random.choice(user_agents)
+        
+        if accept_languages:
+            request.headers['Accept-Language'] = random.choice(accept_languages)
+        
+        if accept_headers:
+            request.headers['Accept'] = random.choice(accept_headers)
+
+        request.headers.setdefault('Accept-Encoding', 'gzip, deflate, br')
+        request.headers.setdefault('Connection', 'keep-alive')
+        request.headers.setdefault('Upgrade-Insecure-Requests', '1')
+        request.headers.setdefault('Sec-Fetch-Dest', 'document')
+        request.headers.setdefault('Sec-Fetch-Mode', 'navigate')
+        request.headers.setdefault('Sec-Fetch-Site', 'none')
+        request.headers.setdefault('Sec-Fetch-User', '?1')
+        request.headers.setdefault('Cache-Control', 'max-age=0')
+
         return None
 
     def process_response(self, request, response, spider):

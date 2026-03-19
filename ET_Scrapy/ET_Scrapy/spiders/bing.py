@@ -8,6 +8,8 @@ from scrapy import Spider, Request
 from scrapy.http import Response
 from scrapy_playwright.page import PageMethod
 
+from ET_Scrapy.items import EtScrapyItem
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +26,7 @@ class BingSpider(Spider):
     name = "bing"
     allowed_domains = ["www.bing.com"]
 
-    DEFAULT_KEYWORD = ["新能源", "人工智能", "光伏", "储能"]
+    DEFAULT_KEYWORD = ["人工智能"]
     MAX_PAGES = 6
     PAGING_FORM = "PORE"
 
@@ -37,6 +39,7 @@ class BingSpider(Spider):
             self.keywords = self.DEFAULT_KEYWORD
 
         self.all_links = set()
+        self.items_to_download = []
 
     def start_requests(self):
         for keyword in self.keywords:
@@ -60,7 +63,19 @@ class BingSpider(Spider):
             ],
             "playwright_context": "bing",
             "playwright_context_kwargs": {
-                "proxy": get_proxy_config()
+                "proxy": get_proxy_config(),
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
+                "extra_http_headers": {
+                    "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
+                    "sec-ch-ua-arch": '"x86"',
+                    "sec-ch-ua-bitness": '"64"',
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-fetch-dest": "document",
+                    "sec-fetch-mode": "navigate",
+                    "sec-fetch-site": "none",
+                    "sec-fetch-user": "?1",
+                }
             },
             "page_index": page_index,
             "keyword": keyword,
@@ -103,9 +118,20 @@ class BingSpider(Spider):
         self.all_links.update(links)
         after_count = len(self.all_links)
 
+        # Yield Item 给 Pipeline 下载
+        keyword = response.meta.get('keyword')
+        page_index = response.meta.get('page_index', 1)
+        for link in links:
+            item = EtScrapyItem(
+                url=link,
+                keyword=keyword,
+                page_index=page_index,
+            )
+            yield item
+
         logger.info(
-            f"关键词={response.meta.get('keyword')} | "
-            f"当前页 page={response.meta.get('page_index')} | "
+            f"关键词={keyword} | "
+            f"当前页 page={page_index} | "
             f"提取 {len(links)} 条 | "
             f"新增 {after_count - before_count} 条 | "
             f"累计 {after_count} 条"

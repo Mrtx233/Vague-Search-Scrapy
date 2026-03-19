@@ -1,12 +1,10 @@
-# Define here the models for your scraped items
-#
-# See documentation in:
-# https://docs.scrapy.org/en/latest/topics/items.html
-
 import scrapy
 
 
 class EtScrapyItem(scrapy.Item):
-    # define the fields for your item here like:
-    # name = scrapy.Field()
-    pass
+    url = scrapy.Field()          # 原始 Bing 重定向 URL
+    keyword = scrapy.Field()       # 关键词
+    page_index = scrapy.Field()    # 页码
+    status = scrapy.Field()        # 下载状态: success, failed, skipped_exists 等
+    filepath = scrapy.Field()       # 本地保存路径
+    file_size = scrapy.Field()     # 文件大小（字节）
