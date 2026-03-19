@@ -66,6 +66,7 @@ ITEM_PIPELINES = {
 DOWNLOAD_DIR = "downloads"          # 下载保存目录
 DOWNLOAD_TIMEOUT = 30               # 下载超时（秒）
 DOWNLOAD_MAX_RETRIES = 2            # 最大重试次数
+DOWNLOAD_PROXY = "http://127.0.0.1:7897"  # requests 下载阶段使用的代理
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

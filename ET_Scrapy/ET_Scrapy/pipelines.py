@@ -1,11 +1,24 @@
+import hashlib
 import logging
 import os
+import random
 import re
+import time
+from pathlib import Path
+from urllib.parse import unquote, urlparse
+
 import requests
+import urllib3
 from itemadapter import ItemAdapter
-from urllib.parse import unquote
 
 logger = logging.getLogger(__name__)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/146.0.0.0 Safari/537.36"
+)
 
 
 class EtScrapyPipeline:
@@ -14,13 +27,17 @@ class EtScrapyPipeline:
 
 
 class FileDownloadPipeline:
-    """文件下载 Pipeline，处理 Bing 重定向链接"""
+    """下载 Bing 结果中的文件，支持解析 ck 跳转页中的真实下载地址。"""
 
-    def __init__(self, download_dir, timeout=30, max_retries=2):
-        self.download_dir = download_dir
+    ALLOWED_EXTENSIONS = {".xlsx", ".xls"}
+
+    def __init__(self, download_dir, timeout=30, max_retries=2, proxy_url=None):
+        self.download_dir = Path(download_dir)
         self.timeout = timeout
         self.max_retries = max_retries
-        os.makedirs(self.download_dir, exist_ok=True)
+        self.proxy_url = proxy_url
+        self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.session = None
 
     @classmethod
     def from_crawler(cls, crawler):
@@ -28,113 +45,186 @@ class FileDownloadPipeline:
             download_dir=crawler.settings.get("DOWNLOAD_DIR", "downloads"),
             timeout=crawler.settings.get("DOWNLOAD_TIMEOUT", 30),
             max_retries=crawler.settings.get("DOWNLOAD_MAX_RETRIES", 2),
+            proxy_url=crawler.settings.get("DOWNLOAD_PROXY"),
         )
 
     def open_spider(self, spider):
-        logger.info(f"文件下载 Pipeline 已启动，保存目录: {self.download_dir}")
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": DEFAULT_USER_AGENT})
+        if self.proxy_url:
+            self.session.proxies.update({
+                "http": self.proxy_url,
+                "https": self.proxy_url,
+            })
+        logger.info("文件下载 Pipeline 已启动，保存目录: %s", self.download_dir)
 
     def close_spider(self, spider):
+        if self.session is not None:
+            self.session.close()
+            self.session = None
         logger.info("爬虫结束，文件下载 Pipeline 已关闭")
 
-    def get_real_url(self, url):
-        """跟随重定向获取真实文件 URL"""
+    def extract_real_download_url_with_requests(self, download_link: str) -> str:
+        if "www.bing.com/ck" not in download_link:
+            return download_link
+
         try:
-            response = requests.head(
-                url,
+            redirect_resp = self.session.get(
+                download_link,
+                timeout=(5, 15),
                 allow_redirects=True,
-                timeout=10,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-                }
+                verify=False,
             )
-            # 如果 URL 发生变化，说明有重定向
-            if response.url != url:
-                return response.url
-            return url
-        except Exception as e:
-            logger.warning(f"获取真实 URL 失败: {url} | 错误: {e}")
-            return None
+            redirect_resp.raise_for_status()
 
-    def extract_filename(self, url, real_url=None):
-        """从 URL 中提取文件名"""
-        # 优先使用真实 URL
-        target_url = real_url or url
+            match = re.search(r'var\s+u\s*=\s*"([^"]+)"', redirect_resp.text)
+            if not match:
+                raise ValueError("未在 Bing 跳转页中匹配到真实下载地址")
 
-        # 尝试从真实 URL 提取 xlsx/xls 文件名
-        match = re.search(r'[^/]+\.(xlsx|xls)(?:\?|$)', target_url)
-        if match:
-            return match.group(0)
+            real_download_link = match.group(1)
+            logger.info("成功从 Bing ck 页面提取真实下载地址 | url=%s", download_link)
+            return real_download_link
+        except Exception as exc:
+            logger.warning("Bing 跳转链接处理失败，回退使用原链接 | url=%s | error=%s", download_link, exc)
+            return download_link
 
-        # 如果真实 URL 没有文件名，尝试从 Bing 重定向参数中解码
-        if "&u=a1aHR0c" in url:
+    def build_temp_filename(self, original_url: str, real_url: str) -> str:
+        parsed = urlparse(real_url)
+        suffix = Path(parsed.path).suffix.lower()
+        if suffix not in self.ALLOWED_EXTENSIONS:
+            suffix = Path(urlparse(unquote(original_url)).path).suffix.lower()
+        if suffix not in self.ALLOWED_EXTENSIONS:
+            suffix = ".xlsx"
+
+        return f"temp_{int(time.time())}_{random.randint(1000, 9999)}{suffix}"
+
+    def is_allowed_file_type(self, file_path: Path) -> bool:
+        return file_path.suffix.lower() in self.ALLOWED_EXTENSIONS
+
+    def download_file(self, url: str, save_path: Path) -> bool:
+        for attempt in range(1, self.max_retries + 2):
             try:
-                encoded = url.split('&u=a1aHR0c')[1].split('&ntb')[0]
-                decoded = unquote(encoded)
-                match = re.search(r'[^/]+\.(xlsx|xls)$', decoded)
-                if match:
-                    return match.group(0)
-            except:
-                pass
+                resume_headers = {}
+                if save_path.exists():
+                    existing_size = save_path.stat().st_size
+                    if existing_size > 0:
+                        resume_headers["Range"] = f"bytes={existing_size}-"
+                        logger.info("断点续传，已下载 %s 字节 | file=%s", existing_size, save_path.name)
 
-        # 最后使用 URL 的 hash 作为文件名
-        url_hash = abs(hash(url)) % 1000000
-        return f"download_{url_hash}.xlsx"
-
-    def process_item(self, item, spider):
-        """下载文件"""
-        adapter = ItemAdapter(item)
-        url = adapter.get("url")
-
-        if not url:
-            return item
-
-        # 获取真实 URL
-        real_url = self.get_real_url(url)
-        if not real_url:
-            adapter["status"] = "failed_to_get_real_url"
-            return item
-
-        # 提取文件名
-        filename = self.extract_filename(url, real_url)
-        filepath = os.path.join(self.download_dir, filename)
-
-        # 跳过已存在的文件
-        if os.path.exists(filepath):
-            adapter["status"] = "skipped_exists"
-            adapter["filepath"] = filepath
-            logger.info(f"⏭ 跳过已存在: {filename}")
-            return item
-
-        # 下载文件 - 使用真实 URL 下载
-        for retry in range(self.max_retries + 1):
-            try:
-                response = requests.get(
-                    real_url,
+                response = self.session.get(
+                    url,
+                    headers=resume_headers,
                     stream=True,
                     timeout=self.timeout,
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
-                    }
-)
+                    allow_redirects=True,
+                    verify=False,
+                )
 
-
-                if response.status_code == 200:
-                    with open(filepath, 'wb') as f:
-                        for chunk in response.iter_content(8192):
-                            f.write(chunk)
-
-                    adapter["status"] = "success"
-                    adapter["filepath"] = filepath
-                    adapter["file_size"] = os.path.getsize(filepath)
-                    logger.info(f"✅ 下载成功: {filename} ({adapter['file_size']} bytes)")
-                    return item
+                if response.status_code == 206:
+                    mode = "ab"
+                elif response.status_code == 200:
+                    mode = "wb"
                 else:
-                    logger.warning(f"HTTP {response.status_code}: {filename}")
+                    response.raise_for_status()
+                    mode = "wb"
 
-            except Exception as e:
-                logger.warning(f"下载失败 {filename} (尝试 {retry + 1}/{self.max_retries + 1}): {e}")
-                if retry < self.max_retries:
-                    continue
+                with open(save_path, mode) as file_obj:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            file_obj.write(chunk)
 
-        adapter["status"] = "failed"
+                logger.info("文件下载成功 | file=%s", save_path.name)
+                return True
+            except Exception as exc:
+                logger.warning(
+                    "下载失败，准备重试 | url=%s | attempt=%s/%s | error=%s",
+                    url,
+                    attempt,
+                    self.max_retries + 1,
+                    exc,
+                )
+                if attempt > self.max_retries:
+                    break
+
+        if save_path.exists():
+            try:
+                save_path.unlink()
+            except OSError:
+                pass
+        return False
+
+    def calculate_md5(self, file_path: Path) -> str | None:
+        try:
+            md5_hash = hashlib.md5()
+            with open(file_path, "rb") as file_obj:
+                for chunk in iter(lambda: file_obj.read(8192), b""):
+                    md5_hash.update(chunk)
+            return md5_hash.hexdigest().lower()
+        except Exception as exc:
+            logger.warning("计算 MD5 失败 | file=%s | error=%s", file_path, exc)
+            return None
+
+    def build_final_filename(self, md5_hash: str, temp_path: Path) -> str:
+        suffix = temp_path.suffix.lower() or ".xlsx"
+        return f"{md5_hash}{suffix}"
+
+    def process_item(self, item, spider):
+        adapter = ItemAdapter(item)
+        original_url = adapter.get("url")
+
+        if not original_url:
+            return item
+
+        real_url = self.extract_real_download_url_with_requests(original_url)
+        adapter["real_url"] = real_url
+
+        temp_filename = self.build_temp_filename(original_url, real_url)
+        temp_path = self.download_dir / temp_filename
+
+        if not self.download_file(real_url, temp_path):
+            adapter["status"] = "failed"
+            return item
+
+        if not self.is_allowed_file_type(temp_path):
+            logger.warning("文件类型不符合要求，删除文件 | file=%s", temp_path.name)
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            adapter["status"] = "invalid_extension"
+            return item
+
+        md5_hash = self.calculate_md5(temp_path)
+        if not md5_hash:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            adapter["status"] = "failed_md5"
+            return item
+
+        final_filename = self.build_final_filename(md5_hash, temp_path)
+        final_path = self.download_dir / final_filename
+
+        if final_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+            adapter["status"] = "skipped_duplicate_md5"
+            adapter["filepath"] = str(final_path)
+            adapter["filename"] = final_filename
+            adapter["file_size"] = final_path.stat().st_size
+            adapter["md5"] = md5_hash
+            logger.info("MD5 重复，跳过保存 | file=%s", final_filename)
+            return item
+
+        os.replace(temp_path, final_path)
+
+        adapter["status"] = "success"
+        adapter["filepath"] = str(final_path)
+        adapter["filename"] = final_filename
+        adapter["file_size"] = final_path.stat().st_size
+        adapter["md5"] = md5_hash
+        logger.info("下载完成并按 MD5 命名 | file=%s | size=%s", final_filename, adapter["file_size"])
         return item
